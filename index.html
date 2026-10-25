@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Visor 3D con Cámara - Cubo AR</title>
+  <title>Cubo 3D AR - Anclaje en Espacio</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; }
     
@@ -20,7 +20,7 @@
       user-select: none;
     }
 
-    /* Fondo de Cámara en Vivo */
+    /* Transmisión de Cámara */
     #camera-feed {
       position: fixed;
       top: 0;
@@ -31,24 +31,46 @@
       z-index: 1;
     }
 
-    /* Capa de Instrucciones */
-    .instruction {
+    /* Interfaz Superior */
+    .header-ui {
       position: fixed;
-      top: 20px;
+      top: 15px;
       z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .instruction {
       color: #ffffff;
-      font-size: 13px;
+      font-size: 12px;
       text-align: center;
-      pointer-events: none;
-      background: rgba(0, 0, 0, 0.65);
-      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 6px 14px;
       border-radius: 20px;
-      line-height: 1.4;
       backdrop-filter: blur(4px);
       border: 1px solid rgba(255, 255, 255, 0.2);
     }
 
-    /* Escena 3D Trasparente */
+    .btn-anchor {
+      background: #28a745;
+      color: white;
+      border: 2px solid white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 13px;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      touch-action: auto;
+    }
+
+    .btn-anchor.active {
+      background: #dc3545;
+    }
+
+    /* Escena 3D */
     .scene {
       width: 180px;
       height: 180px;
@@ -67,7 +89,7 @@
       transition: transform 0.05s ease-out;
     }
 
-    /* Caras del Cubo con Semi-Transparencia */
+    /* Caras del Cubo */
     .face {
       position: absolute;
       width: 180px;
@@ -83,7 +105,6 @@
       box-shadow: inset 0 0 15px rgba(0,0,0,0.4);
     }
 
-    /* Posiciones Tridimensionales */
     .front  { transform: rotateY(0deg) translateZ(90px); }
     .back   { transform: rotateY(180deg) translateZ(90px); }
     .right  { transform: rotateY(90deg) translateZ(90px); }
@@ -91,7 +112,7 @@
     .top    { transform: rotateX(90deg) translateZ(90px); }
     .bottom { transform: rotateX(-90deg) translateZ(90px); }
 
-    /* Estado: Aristas (Wireframe sobre la cámara) */
+    /* Estado: Aristas */
     .cube.aristas .face {
       background: rgba(0, 255, 204, 0.08) !important;
       border: 4px solid #00ffcc !important;
@@ -99,7 +120,7 @@
       color: #00ffcc;
     }
 
-    /* Estado: Desarmado (Vista Explotada) */
+    /* Estado: Desarmado */
     .cube.desarmado .front  { transform: rotateY(0deg) translateZ(190px); background: rgba(255, 71, 87, 0.85); }
     .cube.desarmado .back   { transform: rotateY(180deg) translateZ(190px); background: rgba(255, 165, 2, 0.85); }
     .cube.desarmado .right  { transform: rotateY(90deg) translateZ(190px); background: rgba(46, 213, 115, 0.85); }
@@ -107,7 +128,7 @@
     .cube.desarmado .top    { transform: rotateX(90deg) translateZ(190px); background: rgba(83, 82, 237, 0.85); }
     .cube.desarmado .bottom { transform: rotateX(-90deg) translateZ(190px); background: rgba(255, 107, 129, 0.85); }
 
-    /* Botonera de Control */
+    /* Botonera Inferior */
     .controls {
       position: fixed;
       bottom: 30px;
@@ -135,15 +156,19 @@
 </head>
 <body>
 
-  <!-- Video para transmisión de Cámara -->
+  <!-- Transmisión de Cámara Web -->
   <video id="camera-feed" autoplay playsinline muted></video>
 
-  <div class="instruction">
-    📷 Cámara Trasera Activada<br>
-    👆 1 dedo para girar | 🤌 2 dedos para zoom
+  <!-- Panel Superior -->
+  <div class="header-ui">
+    <button id="btn-anchor" class="btn-anchor" onclick="toggleAnchor()">📌 Fijar Cubo en Espacio</button>
+    <div class="instruction">
+      👆 1 dedo: Rotación manual | 🤌 2 dedos: Zoom<br>
+      📱 Activa "Fijar Cubo" para explorar moviendo el celular
+    </div>
   </div>
 
-  <!-- Escena 3D sobrepuesta -->
+  <!-- Escena Tridimensional -->
   <div class="scene">
     <div id="cube" class="cube entero">
       <div class="face front">1</div>
@@ -155,7 +180,7 @@
     </div>
   </div>
 
-  <!-- Botones de Interacción -->
+  <!-- Estados Geométricos -->
   <div class="controls">
     <button class="btn" onclick="setVista('entero')">Sólido</button>
     <button class="btn" onclick="setVista('aristas')">Aristas</button>
@@ -163,7 +188,7 @@
   </div>
 
   <script>
-    // Inicialización de Cámara WebRTC
+    // 1. Inicialización de Cámara Trasera
     async function initCamera() {
       const video = document.getElementById('camera-feed');
       try {
@@ -173,25 +198,32 @@
         });
         video.srcObject = stream;
       } catch (err) {
-        console.warn("No se pudo acceder a la cámara trasera, intentando cualquier cámara...", err);
         try {
-          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-          video.srcObject = fallbackStream;
+          const fallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          video.srcObject = fallback;
         } catch (e) {
-          alert("Debes aceptar los permisos de cámara en tu navegador para ver la transmisión de fondo.");
+          alert("Permite el acceso a la cámara para activar la realidad aumentada.");
         }
       }
     }
-
     window.addEventListener('DOMContentLoaded', initCamera);
 
-    // Lógica Táctil (Giro 360° + Pinch Zoom)
+    // 2. Control de Estados y Orientación
     const cube = document.getElementById('cube');
+    const btnAnchor = document.getElementById('btn-anchor');
+    
+    let isAnchored = false;
     let isDragging = false;
     let previousPos = { x: 0, y: 0 };
+    
     let rotX = -20;
     let rotY = 20;
     let scale = 1.0;
+    
+    let baseAlpha = 0;
+    let baseBeta = 0;
+    let baseGamma = 0;
+    
     let initialPinchDistance = null;
     let initialScale = 1.0;
 
@@ -199,36 +231,52 @@
       cube.style.transform = `scale(${scale}) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
     }
 
+    // Activar/Desactivar Anclaje de Giroscopio
+    function toggleAnchor() {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(response => {
+          if (response === 'granted') {
+            switchAnchorState();
+          } else {
+            alert('Se requiere permiso de giroscopio para fijar el objeto.');
+          }
+        });
+      } else {
+        switchAnchorState();
+      }
+    }
+
+    function switchAnchorState() {
+      isAnchored = !isAnchored;
+      if (isAnchored) {
+        btnAnchor.textContent = "🔓 Liberar Posición";
+        btnAnchor.classList.add('active');
+      } else {
+        btnAnchor.textContent = "📌 Fijar Cubo en Espacio";
+        btnAnchor.classList.remove('active');
+      }
+    }
+
+    // Listener de Giroscopio (Orientación Física del Teléfono)
+    window.addEventListener('deviceorientation', (e) => {
+      if (!isAnchored) return;
+
+      const pitch = e.beta || 0;  // Inclinación frontal (-180 a 180)
+      const yaw = e.alpha || 0;    // Rotación sobre eje Z (0 a 360)
+
+      // Se compensa el movimiento del móvil para mantener el cubo estático
+      rotX = -pitch * 0.8;
+      rotY = -yaw * 0.8;
+      renderTransform();
+    });
+
+    // Controles Táctiles Manuales
     function getDistance(touches) {
       const dx = touches[0].clientX - touches[1].clientX;
       const dy = touches[0].clientY - touches[1].clientY;
       return Math.hypot(dx, dy);
     }
 
-    // Controles Mouse
-    window.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'BUTTON') return;
-      isDragging = true;
-      previousPos = { x: e.clientX, y: e.clientY };
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      rotY += (e.clientX - previousPos.x) * 0.7;
-      rotX -= (e.clientY - previousPos.y) * 0.7;
-      renderTransform();
-      previousPos = { x: e.clientX, y: e.clientY };
-    });
-
-    window.addEventListener('mouseup', () => { isDragging = false; });
-
-    window.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      scale = e.deltaY < 0 ? Math.min(scale + 0.1, 2.5) : Math.max(scale - 0.1, 0.4);
-      renderTransform();
-    }, { passive: false });
-
-    // Controles Táctiles (1 Dedo = Rotar | 2 Dedos = Zoom)
     window.addEventListener('touchstart', (e) => {
       if (e.target.tagName === 'BUTTON') return;
 
@@ -243,7 +291,7 @@
     }, { passive: true });
 
     window.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 1 && isDragging) {
+      if (e.touches.length === 1 && isDragging && !isAnchored) {
         rotY += (e.touches[0].clientX - previousPos.x) * 0.7;
         rotX -= (e.touches[0].clientY - previousPos.y) * 0.7;
         renderTransform();
@@ -260,7 +308,6 @@
       if (e.touches.length === 0) isDragging = false;
     });
 
-    // Cambiar Modos de Vista
     function setVista(modo) {
       cube.classList.remove('entero', 'aristas', 'desarmado');
       cube.classList.add(modo);
