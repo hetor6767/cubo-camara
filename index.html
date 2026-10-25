@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Visor 3D con Cámara - Cubo AR</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; touch-action: none; }
+    
+    body {
+      background-color: #000000;
+      color: white;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Fondo de Cámara en Vivo */
+    #camera-feed {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      z-index: 1;
+    }
+
+    /* Capa de Instrucciones */
+    .instruction {
+      position: fixed;
+      top: 20px;
+      z-index: 100;
+      color: #ffffff;
+      font-size: 13px;
+      text-align: center;
+      pointer-events: none;
+      background: rgba(0, 0, 0, 0.65);
+      padding: 8px 16px;
+      border-radius: 20px;
+      line-height: 1.4;
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    /* Escena 3D Trasparente */
+    .scene {
+      width: 180px;
+      height: 180px;
+      perspective: 800px;
+      margin-bottom: 60px;
+      z-index: 10;
+      position: relative;
+    }
+
+    .cube {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      transform-style: preserve-3d;
+      transform: scale(1) rotateX(-20deg) rotateY(20deg);
+      transition: transform 0.05s ease-out;
+    }
+
+    /* Caras del Cubo con Semi-Transparencia */
+    .face {
+      position: absolute;
+      width: 180px;
+      height: 180px;
+      background: rgba(0, 123, 255, 0.82);
+      border: 2px solid #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: bold;
+      transition: background 0.4s, border 0.4s, transform 0.5s;
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.4);
+    }
+
+    /* Posiciones Tridimensionales */
+    .front  { transform: rotateY(0deg) translateZ(90px); }
+    .back   { transform: rotateY(180deg) translateZ(90px); }
+    .right  { transform: rotateY(90deg) translateZ(90px); }
+    .left   { transform: rotateY(-90deg) translateZ(90px); }
+    .top    { transform: rotateX(90deg) translateZ(90px); }
+    .bottom { transform: rotateX(-90deg) translateZ(90px); }
+
+    /* Estado: Aristas (Wireframe sobre la cámara) */
+    .cube.aristas .face {
+      background: rgba(0, 255, 204, 0.08) !important;
+      border: 4px solid #00ffcc !important;
+      box-shadow: 0 0 15px #00ffcc;
+      color: #00ffcc;
+    }
+
+    /* Estado: Desarmado (Vista Explotada) */
+    .cube.desarmado .front  { transform: rotateY(0deg) translateZ(190px); background: rgba(255, 71, 87, 0.85); }
+    .cube.desarmado .back   { transform: rotateY(180deg) translateZ(190px); background: rgba(255, 165, 2, 0.85); }
+    .cube.desarmado .right  { transform: rotateY(90deg) translateZ(190px); background: rgba(46, 213, 115, 0.85); }
+    .cube.desarmado .left   { transform: rotateY(-90deg) translateZ(190px); background: rgba(30, 144, 255, 0.85); }
+    .cube.desarmado .top    { transform: rotateX(90deg) translateZ(190px); background: rgba(83, 82, 237, 0.85); }
+    .cube.desarmado .bottom { transform: rotateX(-90deg) translateZ(190px); background: rgba(255, 107, 129, 0.85); }
+
+    /* Botonera de Control */
+    .controls {
+      position: fixed;
+      bottom: 30px;
+      display: flex;
+      gap: 10px;
+      z-index: 100;
+      touch-action: auto;
+    }
+
+    .btn {
+      background-color: rgba(0, 123, 255, 0.9);
+      color: white;
+      border: 2px solid white;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.6);
+      backdrop-filter: blur(4px);
+    }
+
+    .btn:active { background-color: #0056b3; }
+  </style>
+</head>
+<body>
+
+  <!-- Video para transmisión de Cámara -->
+  <video id="camera-feed" autoplay playsinline muted></video>
+
+  <div class="instruction">
+    📷 Cámara Trasera Activada<br>
+    👆 1 dedo para girar | 🤌 2 dedos para zoom
+  </div>
+
+  <!-- Escena 3D sobrepuesta -->
+  <div class="scene">
+    <div id="cube" class="cube entero">
+      <div class="face front">1</div>
+      <div class="face back">2</div>
+      <div class="face right">3</div>
+      <div class="face left">4</div>
+      <div class="face top">5</div>
+      <div class="face bottom">6</div>
+    </div>
+  </div>
+
+  <!-- Botones de Interacción -->
+  <div class="controls">
+    <button class="btn" onclick="setVista('entero')">Sólido</button>
+    <button class="btn" onclick="setVista('aristas')">Aristas</button>
+    <button class="btn" onclick="setVista('desarmado')">Desarmado</button>
+  </div>
+
+  <script>
+    // Inicialización de Cámara WebRTC
+    async function initCamera() {
+      const video = document.getElementById('camera-feed');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (err) {
+        console.warn("No se pudo acceder a la cámara trasera, intentando cualquier cámara...", err);
+        try {
+          const fallbackStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+          video.srcObject = fallbackStream;
+        } catch (e) {
+          alert("Debes aceptar los permisos de cámara en tu navegador para ver la transmisión de fondo.");
+        }
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', initCamera);
+
+    // Lógica Táctil (Giro 360° + Pinch Zoom)
+    const cube = document.getElementById('cube');
+    let isDragging = false;
+    let previousPos = { x: 0, y: 0 };
+    let rotX = -20;
+    let rotY = 20;
+    let scale = 1.0;
+    let initialPinchDistance = null;
+    let initialScale = 1.0;
+
+    function renderTransform() {
+      cube.style.transform = `scale(${scale}) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+    }
+
+    function getDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    // Controles Mouse
+    window.addEventListener('mousedown', (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+      isDragging = true;
+      previousPos = { x: e.clientX, y: e.clientY };
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      rotY += (e.clientX - previousPos.x) * 0.7;
+      rotX -= (e.clientY - previousPos.y) * 0.7;
+      renderTransform();
+      previousPos = { x: e.clientX, y: e.clientY };
+    });
+
+    window.addEventListener('mouseup', () => { isDragging = false; });
+
+    window.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      scale = e.deltaY < 0 ? Math.min(scale + 0.1, 2.5) : Math.max(scale - 0.1, 0.4);
+      renderTransform();
+    }, { passive: false });
+
+    // Controles Táctiles (1 Dedo = Rotar | 2 Dedos = Zoom)
+    window.addEventListener('touchstart', (e) => {
+      if (e.target.tagName === 'BUTTON') return;
+
+      if (e.touches.length === 1) {
+        isDragging = true;
+        previousPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      } else if (e.touches.length === 2) {
+        isDragging = false;
+        initialPinchDistance = getDistance(e.touches);
+        initialScale = scale;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1 && isDragging) {
+        rotY += (e.touches[0].clientX - previousPos.x) * 0.7;
+        rotX -= (e.touches[0].clientY - previousPos.y) * 0.7;
+        renderTransform();
+        previousPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      } else if (e.touches.length === 2 && initialPinchDistance) {
+        const factor = getDistance(e.touches) / initialPinchDistance;
+        scale = Math.min(Math.max(initialScale * factor, 0.4), 2.5);
+        renderTransform();
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) initialPinchDistance = null;
+      if (e.touches.length === 0) isDragging = false;
+    });
+
+    // Cambiar Modos de Vista
+    function setVista(modo) {
+      cube.classList.remove('entero', 'aristas', 'desarmado');
+      cube.classList.add(modo);
+    }
+  </script>
+</body>
+</html>
